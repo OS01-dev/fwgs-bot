@@ -1,8 +1,3 @@
-#BOT_TOKEN = "8477283169:AAEDMCdOXYgOX_EOG6PawAkUBD6HctmCQdU"
-#New Bot Token-7815845875:AAHUK-_jIgYLHZQAp2sZ21ns24zpbt3yUY4
-#DATABASE_URL = "postgresql://postgres.ygdbmdbzcamknfjbqwvv:WKAAiQDWKzMmTPbo@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
-#CHAT_ID = "8537265647"
-
 """
 Unified Fine Wine & Good Spirits Bot (Complex Version C)
 - Single-file implementation
@@ -61,9 +56,14 @@ import aiohttp
 # -------------------------
 # Configuration - Set your credentials here
 # -------------------------
-BOT_TOKEN = "7815845875:AAHUK-_jIgYLHZQAp2sZ21ns24zpbt3yUY4"
-DATABASE_URL = "postgresql://postgres.ygdbmdbzcamknfjbqwvv:WKAAiQDWKzMmTPbo@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
-CHAT_ID = "8537265647"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
+OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set!")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable not set!")
 
 # Validate configuration
 if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
