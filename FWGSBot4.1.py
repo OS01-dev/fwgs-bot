@@ -18,6 +18,7 @@ import requests
 import re
 import aiohttp
 from datetime import datetime, timedelta, time as datetime_time
+from datetime import datetime, timedelta, time, timezone
 from dotenv import load_dotenv
 import pandas as pd
 import openpyxl
@@ -2661,8 +2662,7 @@ def get_user_subscription_status(user_id):
             return None
         
         is_admin, is_subscribed, expiry = result
-        from datetime import timezone
-        now = datetime.now(timezone.utc).time()
+        now = datetime.now()
         
         # Check if subscription is still valid
         is_active = is_subscribed and (expiry is None or expiry > now)
