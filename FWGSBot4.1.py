@@ -56,26 +56,30 @@ import aiohttp
 # -------------------------
 # Configuration - Set your credentials here
 # -------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
+BOT_TOKEN = "7815845875:AAHUK-_jIgYLHZQAp2sZ21ns24zpbt3yUY4"
+DATABASE_URL = "postgresql://postgres.ygdbmdbzcamknfjbqwvv:WKAAiQDWKzMmTPbo@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
+OWNER_CHAT_ID = "8537265647"
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable not set!")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable not set!")
+##BOT_TOKEN = os.getenv("BOT_TOKEN")
+##DATABASE_URL = os.getenv("DATABASE_URL")
+##OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
 
-# Validate configuration
-if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-    raise ValueError("Please set BOT_TOKEN in the script!")
-if not DATABASE_URL or DATABASE_URL == "YOUR_DATABASE_URL_HERE":
-    raise ValueError("Please set DATABASE_URL in the script!")
-
-# Convert OWNER_CHAT_ID to int if provided
-try:
-    OWNER_CHAT_ID = int(OWNER_CHAT_ID) if str(OWNER_CHAT_ID).strip() != "" else None
-except Exception:
-    OWNER_CHAT_ID = None
+##if not BOT_TOKEN:
+##    raise ValueError("BOT_TOKEN environment variable not set!")
+##if not DATABASE_URL:
+##    raise ValueError("DATABASE_URL environment variable not set!")
+##
+### Validate configuration
+##if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+##    raise ValueError("Please set BOT_TOKEN in the script!")
+##if not DATABASE_URL or DATABASE_URL == "YOUR_DATABASE_URL_HERE":
+##    raise ValueError("Please set DATABASE_URL in the script!")
+##
+### Convert OWNER_CHAT_ID to int if provided
+##try:
+##    OWNER_CHAT_ID = int(OWNER_CHAT_ID) if str(OWNER_CHAT_ID).strip() != "" else None
+##except Exception:
+##    OWNER_CHAT_ID = None
 
 # -------------------------
 # Configuration Constants
