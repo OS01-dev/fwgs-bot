@@ -2018,7 +2018,7 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        log(f"⏰ Active monitor checking {len(product_ids)} products...")
+        #log(f"⏰ Active monitor checking {len(product_ids)} products...")
         
         # Get previous states in one batch query
         prev_states = get_product_active_states_batch(product_ids)
@@ -2044,7 +2044,7 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
                 if i + BATCH_SIZE < len(product_ids):
                     await asyncio.sleep(0.5)
         
-        log(f"✅ Fetched active states for {len(current_states)} products")
+        #log(f"✅ Fetched active states for {len(current_states)} products")
         
         # Check for changes and send alerts
         changes = {}
@@ -2097,7 +2097,7 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     log(f"❌ Failed to send alert to {user_id}: {e}")
         
-        log("✅ Active monitor completed")
+        #log("✅ Active monitor completed")
         
     except Exception as e:
         log(f"❌ Error in active_monitor: {e}")
@@ -2119,7 +2119,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        log(f"⏰ Category monitor checking {len(product_ids)} products...")
+        #log(f"⏰ Category monitor checking {len(product_ids)} products...")
         
         # Get previous categories in one batch query
         prev_categories = get_product_categories_batch(product_ids)
@@ -2145,7 +2145,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 if i + BATCH_SIZE < len(product_ids):
                     await asyncio.sleep(0.5)
         
-        log(f"✅ Fetched categories for {len(current_categories)} products")
+        #log(f"✅ Fetched categories for {len(current_categories)} products")
         
         # Check for new whiskey-release categories
         updates = {}
@@ -2183,7 +2183,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     log(f"❌ Failed to send alert to {user_id}: {e}")
         
-        log("✅ Category monitor completed")
+        #log("✅ Category monitor completed")
         
     except Exception as e:
         log(f"❌ Error in category_monitor: {e}")
