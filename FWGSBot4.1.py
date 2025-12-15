@@ -2289,7 +2289,8 @@ async def inventory_refresh_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     
     # Check business hours
-    now = datetime.utcnow().time()  # Use UTC time
+    from datetime import timezone
+    now = datetime.now(datetime.UTC).time()  # Use UTC time
     # Handle wraparound (13:00 to 02:00 next day)
     if BUSINESS_END < BUSINESS_START:  # Crosses midnight
         is_business_hours = now >= BUSINESS_START or now <= BUSINESS_END
@@ -2660,7 +2661,8 @@ def get_user_subscription_status(user_id):
             return None
         
         is_admin, is_subscribed, expiry = result
-        now = datetime.now()
+        from datetime import timezone
+        now = datetime.now(timezone.utc).time()
         
         # Check if subscription is still valid
         is_active = is_subscribed and (expiry is None or expiry > now)
