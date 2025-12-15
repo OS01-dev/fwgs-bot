@@ -1,0 +1,1 @@
+worker: python FWGSBot4.1.py
