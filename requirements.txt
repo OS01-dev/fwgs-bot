@@ -5,10 +5,3 @@ openpyxl==3.1.2
 aiohttp==3.9.1
 APScheduler==3.10.4
 python-dotenv==1.0.0
-```
-
-### 1.2 Create a `Procfile`
-
-Create a file called `Procfile` (no extension) in the same folder:
-```
-worker: python FWGSBot4.1.py
