@@ -97,8 +97,8 @@ PRODUCT_BASE_URL = "https://www.finewineandgoodspirits.com/ccstore/v1/products"
 
 # Business hours for notifications (optional - can adjust later)
 from datetime import time
-BUSINESS_START = time(8, 0)      # 08:00 local
-BUSINESS_END = time(21, 0)       # 21:00 local
+BUSINESS_START = time(13, 0)      # 08:00 local
+BUSINESS_END = time(2, 0)       # 21:00 local
 POLL_INTERVAL_SECONDS = 30 * 60  # 30 minutes
 TRIAL_DAYS = 14  # 2 weeks free trial
 SUBSCRIPTION_PRICE_STARS = 300  # ~$5 (1 Star ≈ $0.015-0.02)
@@ -2289,9 +2289,15 @@ async def inventory_refresh_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     
     # Check business hours
-    now = datetime.now().time()
-    if not (BUSINESS_START <= now <= BUSINESS_END):
-        log(f"Outside business hours ({BUSINESS_START}-{BUSINESS_END}). Skipping inventory check.")
+    now = datetime.utcnow().time()  # Use UTC time
+    # Handle wraparound (13:00 to 02:00 next day)
+    if BUSINESS_END < BUSINESS_START:  # Crosses midnight
+        is_business_hours = now >= BUSINESS_START or now <= BUSINESS_END
+    else:
+        is_business_hours = BUSINESS_START <= now <= BUSINESS_END
+
+    if not is_business_hours:
+        log(f"Outside business hours. Skipping inventory check.")
         return
     
     log("⏰ Inventory refresh job starting...")
@@ -3374,7 +3380,7 @@ async def runner():
     scheduler.add_job(
         lambda: schedule_coroutine(refresh_global_list, app),
         trigger="cron",
-        hour=9,
+        hour=14,
         minute=0,
     )
     
@@ -3382,10 +3388,10 @@ async def runner():
     from telegram.warnings import PTBUserWarning
     warnings.filterwarnings("ignore", category=PTBUserWarning)
     
-    # Daily subscription check (9 AM)
+    # Daily subscription check (Midnight)
     app.job_queue.run_daily(
         check_expired_subscriptions,
-        time=time(hour=8, minute=0),
+        time=time(hour=5, minute=0),
         days=(0, 1, 2, 3, 4, 5, 6)
     )
 
