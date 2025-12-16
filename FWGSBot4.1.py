@@ -3386,6 +3386,145 @@ async def removeglobal_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await update.message.reply_text("\n\n".join(msg_lines))
 
+# ============================================================
+# ALTERNATIVE: CONFIRM BEFORE CLONING (OPTIONAL)
+# If you want users to confirm first (since it might add a lot):
+# ============================================================
+
+async def cloneglobal_with_confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clone all products from global list to user's personal watchlist with confirmation."""
+    user = update.effective_user
+    user_id = str(user.id)
+    username = user.full_name or user.username or "Unknown"
+    
+    # Check access (requires subscription)
+    has_access, reason = check_access(user_id)
+    if not has_access:
+        await update.message.reply_text(
+            "⭐ <b>Premium Feature</b>\n\n"
+            "Subscribe to clone the global list to your watchlist:\n/subscribe",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Check if user wants to confirm or execute
+    if not context.args or context.args[0].lower() != "confirm":
+        # Show preview
+        query = "SELECT COUNT(*) FROM global_products;"
+        conn = None
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(query)
+            count = cur.fetchone()[0]
+            cur.close()
+        except Exception as e:
+            log(f"❌ Error counting global products: {e}")
+            await update.message.reply_text("⚠️ Error retrieving global products.")
+            return
+        finally:
+            if conn:
+                return_db(conn)
+        
+        # Get count already in watchlist
+        already_count = 0
+        query_check = "SELECT product_id FROM watchlist WHERE user_id = %s;"
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(query_check, (user_id,))
+            user_products = set(row[0] for row in cur.fetchall())
+            cur.close()
+            
+            # Count overlap
+            query_global = "SELECT product_id FROM global_products;"
+            cur = conn.cursor()
+            cur.execute(query_global)
+            global_ids = set(row[0] for row in cur.fetchall())
+            cur.close()
+            
+            already_count = len(user_products & global_ids)
+        except Exception as e:
+            log(f"❌ Error checking overlap: {e}")
+        finally:
+            if conn:
+                return_db(conn)
+        
+        new_count = count - already_count
+        
+        msg = (
+            f"📋 <b>Clone Global List</b>\n\n"
+            f"This will add <b>{count} products</b> from the global list to your watchlist.\n\n"
+            f"• Already in your watchlist: {already_count}\n"
+            f"• New products to add: {new_count}\n\n"
+            f"To proceed, send:\n"
+            f"<code>/cloneglobal confirm</code>"
+        )
+        
+        await update.message.reply_text(msg, parse_mode="HTML")
+        return
+    
+    # User confirmed, proceed with cloning
+    await update.message.reply_text("🔄 Cloning global list to your watchlist...")
+    
+    # Get all products from global list
+    query = "SELECT product_id, name FROM global_products ORDER BY name;"
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(query)
+        global_products = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        log(f"❌ Error getting global products: {e}")
+        await update.message.reply_text("⚠️ Error retrieving global products.")
+        return
+    finally:
+        if conn:
+            return_db(conn)
+    
+    if not global_products:
+        await update.message.reply_text("⚠️ Global list is empty.")
+        return
+    
+    # Add each product to user's watchlist
+    added = []
+    already_in = []
+    failed = []
+    
+    for product_id, product_name in global_products:
+        try:
+            if is_in_watchlist(user_id, product_id):
+                already_in.append(product_id)
+                continue
+            
+            if add_to_watchlist(user_id, username, product_id, product_name):
+                added.append((product_id, product_name))
+            else:
+                failed.append(product_id)
+        
+        except Exception as e:
+            log(f"❌ Error adding {product_id} to watchlist for {user_id}: {e}")
+            failed.append(product_id)
+    
+    # Build response message
+    msg = f"✅ <b>Cloned Global List</b>\n\n"
+    
+    if added:
+        msg += f"<b>Added to your watchlist:</b> {len(added)} products\n"
+    
+    if already_in:
+        msg += f"<b>Already in watchlist:</b> {len(already_in)} products\n"
+    
+    if failed:
+        msg += f"<b>Failed:</b> {len(failed)} products\n"
+    
+    msg += f"\n<b>Total in your watchlist:</b> {len(added) + len(already_in)} products"
+    
+    await update.message.reply_text(msg, parse_mode="HTML")
+    
+    log(f"✅ User {user_id} cloned global list: {len(added)} added, {len(already_in)} already had")
 
 # ============================================================
 # SCHEDULER & RUNNER
@@ -3452,6 +3591,7 @@ async def runner():
     app.add_handler(CommandHandler("sendall", sendall_handler))
     app.add_handler(CommandHandler("sendallwatchlist", sendallwatchlist_handler))
     app.add_handler(CommandHandler("removeglobal", removeglobal_handler))
+    app.add_handler(CommandHandler("cloneglobal", cloneglobal_with_confirm_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     log("✅ Handlers registered")
     
