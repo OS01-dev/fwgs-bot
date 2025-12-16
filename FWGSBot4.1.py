@@ -2291,7 +2291,7 @@ async def inventory_refresh_job(context: ContextTypes.DEFAULT_TYPE):
     
     # Check business hours
     from datetime import timezone
-    now = datetime.now(datetime.UTC).time()  # Use UTC time
+    now = datetime.now(timezone.UTC).time()  # Use UTC time
     # Handle wraparound (13:00 to 02:00 next day)
     if BUSINESS_END < BUSINESS_START:  # Crosses midnight
         is_business_hours = now >= BUSINESS_START or now <= BUSINESS_END
