@@ -3301,6 +3301,91 @@ async def sendallwatchlist_handler(update: Update, context: ContextTypes.DEFAULT
     )
     log(f"📢 Watchlist broadcast complete: {success_count} sent, {fail_count} failed")
 
+# ============================================================
+# REMOVE FROM GLOBAL LIST HANDLER (OWNER ONLY)
+# Add this to your bot code
+# ============================================================
+
+def remove_from_global_products(product_id):
+    """Remove a product from global_products table."""
+    query = """
+        DELETE FROM global_products 
+        WHERE product_id = %s
+        RETURNING name;
+    """
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(query, (product_id,))
+        result = cur.fetchone()
+        conn.commit()
+        cur.close()
+        return result[0] if result else None  # Returns product name if deleted
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        log(f"❌ Error removing from global products: {e}")
+        return None
+    finally:
+        if conn:
+            return_db(conn)
+
+
+async def removeglobal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner command to remove product(s) from global list. Usage: /removeglobal <ProductID> [ProductID ...]"""
+    # Only owner can use this
+    if not OWNER_CHAT_ID or str(update.effective_user.id) != str(OWNER_CHAT_ID):
+        await update.message.reply_text("⛔ Owner only command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /removeglobal <ProductID> [ProductID ...]\n\n"
+            "Example: /removeglobal 000006017 000006015"
+        )
+        return
+    
+    raw_ids = [pid.strip() for pid in context.args if pid.strip()]
+    if not raw_ids:
+        await update.message.reply_text("⚠️ No valid product IDs provided.")
+        return
+    
+    removed = []
+    not_found = []
+    
+    for raw_pid in raw_ids:
+        pid = normalize_pid(raw_pid)
+        if pid is None:
+            not_found.append(raw_pid)
+            continue
+        
+        # Check if it exists first
+        if not is_in_global_products(pid):
+            not_found.append(pid)
+            continue
+        
+        # Remove from global list
+        removed_name = remove_from_global_products(pid)
+        
+        if removed_name:
+            removed.append((pid, removed_name))
+            log(f"🗑️ Owner removed {pid} - {removed_name} from global list")
+        else:
+            not_found.append(pid)
+    
+    # Build response message
+    msg_lines = []
+    if removed:
+        msg_lines.append(
+            f"✅ Removed from global list:\n" + 
+            "\n".join([f"• {pid} – {name}" for pid, name in removed])
+        )
+    if not_found:
+        msg_lines.append(f"⚠️ Not found in global list: {', '.join(not_found)}")
+    
+    await update.message.reply_text("\n\n".join(msg_lines))
+
 
 # ============================================================
 # SCHEDULER & RUNNER
@@ -3366,6 +3451,7 @@ async def runner():
     app.add_handler(CommandHandler("reply", reply_handler))
     app.add_handler(CommandHandler("sendall", sendall_handler))
     app.add_handler(CommandHandler("sendallwatchlist", sendallwatchlist_handler))
+    app.add_handler(CommandHandler("removeglobal", removeglobal_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     log("✅ Handlers registered")
     
