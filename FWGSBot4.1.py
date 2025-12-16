@@ -104,6 +104,7 @@ POLL_INTERVAL_SECONDS = 30 * 60  # 30 minutes
 TRIAL_DAYS = 14  # 2 weeks free trial
 SUBSCRIPTION_PRICE_STARS = 300  # ~$5 (1 Star ≈ $0.015-0.02)
 SUBSCRIPTION_DURATION_DAYS = 30  # 30 days per payment
+DATA_DIR = "/data"
 
 # -------------------------
 # Logging Helper
@@ -1332,14 +1333,19 @@ async def refresh_global_list(app=None, send_report_to_owner=True):
     
     # Reset index after sorting
     df = df.reset_index(drop=True)
-
+    
     # Save today's raw DataFrame to Excel (initial)
     try:
         today_str = datetime.now().strftime("%Y%m%d")
-        filename = f"{REPORT_PREFIX}{today_str}.xlsx"
+        filename = os.path.join(DATA_DIR, f"{REPORT_PREFIX}{today_str}.xlsx") # Changed
         log(f"Attempting to save Excel file: {filename}")
         log(f"Current working directory: {os.getcwd()}")
         
+        df.to_excel(filename, index=False)
+        
+        # Ensure the data directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)  # ← Added
+    
         df.to_excel(filename, index=False)
         
         if os.path.exists(filename):
@@ -1355,7 +1361,7 @@ async def refresh_global_list(app=None, send_report_to_owner=True):
 
     # Compare with yesterday's report and highlight changes
     yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-    yesterday_filename = f"{REPORT_PREFIX}{yesterday_str}.xlsx"
+    yesterday_filename = os.path.join(DATA_DIR, f"{REPORT_PREFIX}{yesterday_str}.xlsx")  # ← Changed
 
     if os.path.exists(yesterday_filename):
         log(f"🔎 Comparing with yesterday's report: {yesterday_filename}")
@@ -2575,7 +2581,7 @@ async def statestock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                             
                             if qty > 0:
                                 city, address = store_lookup.get(loc_id, ("Unknown", "Unknown"))
-                                stock_results.append(f"<b>{qty}</b> in stock — {loc_id} — {city}, {address}")
+                                stock_results.append(f"<b>{qty}</b> in stock — {loc_id} — {city}")
                     
                     elif resp.status != 204:
                         log(f"⚠️ Failed chunk {i//CHUNK_SIZE + 1} (status: {resp.status})")
