@@ -3806,34 +3806,45 @@ async def runner():
     # Start app
     await app.start()
     
-    # JobQueue tasks
-    # Active monitor - runs more frequently (critical alerts)
+    # CREATE SCHEDULER FIRST (moved from below)
+    scheduler = AsyncIOScheduler(job_defaults={"misfire_grace_time": 60})
+    log("✅ Scheduler created")
+    
+    # NOW add jobs to scheduler
     scheduler.add_job(
-        active_monitor,
+        lambda: schedule_coroutine(active_monitor, app),  # Wrap in lambda like the other job
         'interval',
-        seconds=30,  # or minutes=1 if you have many products
+        seconds=30,
         max_instances=1,
         misfire_grace_time=30,
         coalesce=True
     )
+    log("✅ Active monitor job added")
+    
     scheduler.add_job(
-        category_monitor,
+        lambda: schedule_coroutine(category_monitor, app),  # Wrap in lambda
         'interval',
-        minutes=5,  # Keep at 5 minutes or increase to 10
+        minutes=5,
         max_instances=1,
         misfire_grace_time=60,
         coalesce=True
     )
-    app.job_queue.run_repeating(inventory_refresh_job, interval=1800, first=10)
+    log("✅ Category monitor job added")
     
-        # APScheduler
-    scheduler = AsyncIOScheduler(job_defaults={"misfire_grace_time": 60})
     scheduler.add_job(
         lambda: schedule_coroutine(refresh_global_list, app),
         trigger="cron",
         hour=14,
         minute=0,
     )
+    log("✅ Daily refresh job added")
+    
+    # Start scheduler
+    scheduler.start()
+    log("⏰ Scheduler started and attached to main event loop")
+    
+    # JobQueue tasks (these use Telegram's built-in job queue)
+    app.job_queue.run_repeating(inventory_refresh_job, interval=1800, first=10)
     
     import warnings
     from telegram.warnings import PTBUserWarning
@@ -3845,9 +3856,6 @@ async def runner():
         time=time(hour=5, minute=0),
         days=(0, 1, 2, 3, 4, 5, 6)
     )
-
-    scheduler.start()
-    log("⏰ Scheduler started and attached to main event loop")
     
     # Start polling
     log("🤖 Bot is running with scheduler active...")
@@ -3860,6 +3868,7 @@ async def runner():
         log("🛑 Bot stopped manually")
     finally:
         # Cleanup
+        scheduler.shutdown()  # Add scheduler shutdown
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
