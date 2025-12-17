@@ -3759,7 +3759,6 @@ async def runner():
     app.add_handler(CommandHandler("removestore", removestore_handler))
     app.add_handler(CommandHandler("mystores", mystores_handler))
     app.add_handler(CommandHandler("statestock", statestock_handler))
-    app.add_handler(CommandHandler("testreport", test_report))
     app.add_handler(CommandHandler("subscribe", subscribe_handler))
     app.add_handler(CommandHandler("status", status_handler))
     app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
