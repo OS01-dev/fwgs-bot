@@ -2252,11 +2252,79 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        log(f"⏰ Category monitor checking {len(product_ids)} products...")  # Keep this - only runs every 5min
+        log(f"⏰ Category monitor checking {len(product_ids)} products...")
         
-        # ... rest of the code stays the same until the statistics section ...
+        # Get previous categories in one batch query
+        prev_categories = get_product_categories_batch(product_ids)
         
-        # Log statistics (keep this - only every 5 minutes)
+        # Fetch current categories with optimized settings
+        BATCH_SIZE = 15
+        BATCH_DELAY = 0.5
+        BATCH_TIMEOUT = 10
+        current_categories = {}  # DEFINE THIS HERE
+        failed_fetches = []
+        timeout_batches = 0
+        
+        # Configure session with connection limits and timeout
+        connector = aiohttp.TCPConnector(
+            limit=20,
+            limit_per_host=15,
+            ttl_dns_cache=300
+        )
+        
+        timeout = aiohttp.ClientTimeout(
+            total=3,
+            connect=1,
+            sock_read=2
+        )
+        
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector
+        ) as session:
+            for i in range(0, len(product_ids), BATCH_SIZE):
+                batch = product_ids[i:i+BATCH_SIZE]
+                batch_num = i // BATCH_SIZE + 1
+                total_batches = (len(product_ids) + BATCH_SIZE - 1) // BATCH_SIZE
+                
+                # Process batch with timeout protection
+                try:
+                    # Fetch all in batch concurrently
+                    tasks = [get_category_only(pid, session) for pid in batch]
+                    
+                    # Add timeout for entire batch
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=BATCH_TIMEOUT
+                    )
+                    
+                    # Process results
+                    success_count = 0
+                    for result in results:
+                        if isinstance(result, Exception):
+                            continue
+                        
+                        pid, categories = result
+                        if categories is not None:
+                            current_categories[pid] = categories  # Keep as-is, don't lowercase
+                            success_count += 1
+                        else:
+                            failed_fetches.append(pid)
+                    
+                    # Only log batch issues if significant problems
+                    if success_count < len(batch) * 0.5:  # Less than 50% success
+                        log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
+                
+                except asyncio.TimeoutError:
+                    log(f"❌ Category batch {batch_num} timed out after {BATCH_TIMEOUT}s")
+                    timeout_batches += 1
+                    failed_fetches.extend(batch)
+                
+                # Delay between batches
+                if i + BATCH_SIZE < len(product_ids):
+                    await asyncio.sleep(BATCH_DELAY)
+        
+        # Log statistics
         elapsed = time.time() - start_time
         success_rate = len(current_categories) / len(product_ids) * 100 if product_ids else 0
         
@@ -2286,7 +2354,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 name = info.get("Name", pid)
                 url = info.get("product_full_url", "")
                 
-                log(f"🔔 NEW whiskey-release: {name}")  # Always log new whiskey-release
+                log(f"🔔 NEW whiskey-release: {name}")
                 
                 if url:
                     msg = f"📣 <a href='{url}'>{name}</a> added to Whiskey-Release!"
@@ -2298,13 +2366,12 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 for user_id in watchers:
                     alerts_to_send.append((user_id, msg))
         
-        # Only log if there ARE whiskey-release products (not every time)
+        # Only log if there ARE whiskey-release products
         if whiskey_release_count > 0:
             log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
         
         if updates:
             set_product_categories_batch(updates)
-            # Don't log the update count every time - too noisy
         
         if alerts_to_send:
             log(f"📤 Sending {len(alerts_to_send)} whiskey-release alerts...")
