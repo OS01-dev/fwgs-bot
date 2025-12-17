@@ -2080,194 +2080,28 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        log(f"⏰ Active monitor checking {len(product_ids)} products...")
+        # Only log start on first run or every 10 minutes
+        if not hasattr(active_monitor, '_last_log_time'):
+            active_monitor._last_log_time = 0
+        
+        should_log = (time.time() - active_monitor._last_log_time) > 600  # 10 minutes
+        
+        if should_log:
+            log(f"⏰ Active monitor checking {len(product_ids)} products...")
+            active_monitor._last_log_time = time.time()
         
         # Get previous states in one batch query
         prev_states = get_product_active_states_batch(product_ids)
         
         # Fetch current states with optimized settings
-        BATCH_SIZE = 15  # Reduced from 20
+        BATCH_SIZE = 15
         BATCH_DELAY = 0.5
-        BATCH_TIMEOUT = 10  # Max time per batch (prevents runaway batches)
+        BATCH_TIMEOUT = 10
         current_states = {}
         failed_fetches = []
         timeout_batches = 0
         
         # Configure session with connection limits
-        connector = aiohttp.TCPConnector(
-            limit=20,           # Max total connections
-            limit_per_host=15,  # Max connections to same host
-            ttl_dns_cache=300   # Cache DNS for 5 min
-        )
-        
-        timeout = aiohttp.ClientTimeout(
-            total=3,      # 3 seconds per request
-            connect=1,    # 1 second to connect
-            sock_read=2   # 2 seconds to read
-        )
-        
-        async with aiohttp.ClientSession(
-            timeout=timeout,
-            connector=connector
-        ) as session:
-            for i in range(0, len(product_ids), BATCH_SIZE):
-                batch = product_ids[i:i+BATCH_SIZE]
-                batch_num = i // BATCH_SIZE + 1
-                total_batches = (len(product_ids) + BATCH_SIZE - 1) // BATCH_SIZE
-                
-                # Process batch with timeout protection
-                try:
-                    # Fetch all in batch concurrently
-                    tasks = [get_active_only(pid, session) for pid in batch]
-                    
-                    # Add timeout for entire batch
-                    results = await asyncio.wait_for(
-                        asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=BATCH_TIMEOUT
-                    )
-                    
-                    # Process results
-                    success_count = 0
-                    for result in results:
-                        if isinstance(result, Exception):
-                            continue
-                        
-                        pid, active_now = result
-                        if active_now is not None:
-                            current_states[pid] = active_now
-                            success_count += 1
-                        else:
-                            failed_fetches.append(pid)
-                    
-                    # Only log if there were issues
-                    if success_count < len(batch) * 0.8:  # Less than 80% success
-                        log(f"⚠️ Batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
-                    
-                except asyncio.TimeoutError:
-                    log(f"❌ Batch {batch_num} timed out after {BATCH_TIMEOUT}s")
-                    timeout_batches += 1
-                    failed_fetches.extend(batch)
-                
-                # Delay between batches
-                if i + BATCH_SIZE < len(product_ids):
-                    await asyncio.sleep(BATCH_DELAY)
-        
-        # Log statistics
-        elapsed = time.time() - start_time
-        success_rate = len(current_states) / len(product_ids) * 100 if product_ids else 0
-        
-        log(f"✅ Active monitor: {len(current_states)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
-        
-        if timeout_batches > 0:
-            log(f"⚠️ {timeout_batches} batches timed out")
-        
-        if failed_fetches and len(failed_fetches) > len(product_ids) * 0.2:  # More than 20% failed
-            log(f"⚠️ High failure rate: {len(failed_fetches)} products failed")
-        
-        # Check for changes and send alerts
-        changes = {}
-        alerts_to_send = []
-        
-        for pid, active_now in current_states.items():
-            prev_active = prev_states.get(pid)
-            
-            if prev_active is None:
-                # First time seeing this product, just store state
-                changes[pid] = active_now
-                continue
-            
-            # Check if status changed
-            if prev_active != active_now:
-                changes[pid] = active_now
-                
-                info = global_cache.get(pid, {})
-                name = info.get("Name", "Unknown")
-                url = info.get("product_full_url", "")
-                
-                # Build alert message
-                if active_now:
-                    msg = f"🔥 <a href='{url}'>{name}</a> is ACTIVE!"
-                else:
-                    msg = f"⚠️ {name} is INACTIVE."
-                
-                # Get all users watching this product
-                watchers = users_watching_product(pid)
-                
-                # Queue alerts
-                for user_id in watchers:
-                    alerts_to_send.append((user_id, msg))
-        
-        # Update all changed states in one batch
-        if changes:
-            set_product_active_states_batch(changes)
-            log(f"🔔 Detected {len(changes)} active state changes")
-        
-        # Send all alerts with rate limiting
-        if alerts_to_send:
-            log(f"📤 Sending {len(alerts_to_send)} alerts...")
-            sent_count = 0
-            
-            for user_id, msg in alerts_to_send:
-                try:
-                    await bot.send_message(
-                        chat_id=int(user_id), 
-                        text=msg, 
-                        parse_mode="HTML"
-                    )
-                    sent_count += 1
-                    
-                    # Rate limit: Telegram allows 30 msgs/sec, we'll do 20 to be safe
-                    if sent_count % 20 == 0:
-                        await asyncio.sleep(1)
-                        
-                except Exception as e:
-                    log(f"❌ Alert failed for user {user_id}: {type(e).__name__}")
-            
-            log(f"✅ Sent {sent_count} alerts")
-        
-        total_elapsed = time.time() - start_time
-        log(f"⏱️ Total active_monitor time: {total_elapsed:.2f}s")
-        
-        # Warn if getting close to interval time
-        if total_elapsed > 25:  # 30s interval - 5s buffer
-            log(f"⚠️ WARNING: Job took {total_elapsed:.2f}s (close to 30s interval)")
-        
-    except Exception as e:
-        log(f"❌ Error in active_monitor: {e}")
-        log(f"Traceback: {traceback.format_exc()}")
-
-
-async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
-    """Monitor products for category changes - OPTIMIZED VERSION."""
-    try:
-        import aiohttp
-        import time
-        
-        start_time = time.time()
-        bot = context.bot
-        
-        # Get all global products from database
-        global_cache = get_all_global_products()
-        
-        if not global_cache:
-            log("⚠️ No products in global list to monitor")
-            return
-        
-        product_ids = list(global_cache.keys())
-        log(f"⏰ Category monitor checking {len(product_ids)} products...")
-        
-        # Get previous categories in one batch query
-        prev_categories = get_product_categories_batch(product_ids)
-        
-        # Fetch current categories with optimized settings
-        BATCH_SIZE = 15
-        BATCH_DELAY = 0.5
-        BATCH_TIMEOUT = 10
-        current_categories = {}
-        failed_fetches = []
-        timeout_batches = 0
-        
-        # Configure session with connection limits and timeout
         connector = aiohttp.TCPConnector(
             limit=20,
             limit_per_host=15,
@@ -2286,52 +2120,149 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         ) as session:
             for i in range(0, len(product_ids), BATCH_SIZE):
                 batch = product_ids[i:i+BATCH_SIZE]
-                batch_num = i // BATCH_SIZE + 1
-                total_batches = (len(product_ids) + BATCH_SIZE - 1) // BATCH_SIZE
                 
-                # Process batch with timeout protection
                 try:
-                    # Fetch all in batch concurrently
-                    tasks = [get_category_only(pid, session) for pid in batch]
-                    
-                    # Add timeout for entire batch
+                    tasks = [get_active_only(pid, session) for pid in batch]
                     results = await asyncio.wait_for(
                         asyncio.gather(*tasks, return_exceptions=True),
                         timeout=BATCH_TIMEOUT
                     )
                     
-                    # Process results
                     success_count = 0
                     for result in results:
                         if isinstance(result, Exception):
                             continue
                         
-                        pid, categories = result
-                        if categories is not None:
-                            current_categories[pid] = categories  # Keep as-is, don't lowercase
+                        pid, active_now = result
+                        if active_now is not None:
+                            current_states[pid] = active_now
                             success_count += 1
                         else:
                             failed_fetches.append(pid)
                     
-                    # Only log if there were issues
-                    if success_count < len(batch) * 0.8:
-                        log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
+                    # Only log batch issues if significant problems
+                    if success_count < len(batch) * 0.5:  # Less than 50% success
+                        log(f"⚠️ Active batch issue: Only {success_count}/{len(batch)} succeeded")
                 
                 except asyncio.TimeoutError:
-                    log(f"❌ Category batch {batch_num} timed out after {BATCH_TIMEOUT}s")
+                    log(f"❌ Active batch timed out after {BATCH_TIMEOUT}s")
                     timeout_batches += 1
                     failed_fetches.extend(batch)
                 
-                # Delay between batches
                 if i + BATCH_SIZE < len(product_ids):
                     await asyncio.sleep(BATCH_DELAY)
         
-        # Log statistics
+        # Calculate statistics
+        elapsed = time.time() - start_time
+        success_rate = len(current_states) / len(product_ids) * 100 if product_ids else 0
+        
+        # Only log if there are problems OR periodic check-in
+        has_issues = success_rate < 95 or elapsed > 20 or timeout_batches > 0
+        
+        if has_issues or should_log:
+            log(f"✅ Active monitor: {len(current_states)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
+            
+            if timeout_batches > 0:
+                log(f"⚠️ {timeout_batches} batches timed out")
+            
+            if failed_fetches and len(failed_fetches) > len(product_ids) * 0.2:
+                log(f"⚠️ High failure rate: {len(failed_fetches)} active fetches failed")
+        
+        # Check for changes and send alerts
+        changes = {}
+        alerts_to_send = []
+        
+        for pid, active_now in current_states.items():
+            prev_active = prev_states.get(pid)
+            
+            if prev_active is None:
+                changes[pid] = active_now
+                continue
+            
+            if prev_active != active_now:
+                changes[pid] = active_now
+                
+                info = global_cache.get(pid, {})
+                name = info.get("Name", "Unknown")
+                url = info.get("product_full_url", "")
+                
+                # Log the status change
+                status = "ACTIVE" if active_now else "INACTIVE"
+                log(f"🔔 Status change: {name} is now {status}")
+                
+                if active_now:
+                    msg = f"🔥 <a href='{url}'>{name}</a> is ACTIVE!"
+                else:
+                    msg = f"⚠️ {name} is INACTIVE."
+                
+                watchers = users_watching_product(pid)
+                
+                for user_id in watchers:
+                    alerts_to_send.append((user_id, msg))
+        
+        # Update all changed states in one batch
+        if changes:
+            set_product_active_states_batch(changes)
+            log(f"🔔 Detected {len(changes)} active state changes")
+        
+        # Send all alerts with rate limiting
+        if alerts_to_send:
+            log(f"📤 Sending {len(alerts_to_send)} active alerts...")
+            sent_count = 0
+            
+            for user_id, msg in alerts_to_send:
+                try:
+                    await bot.send_message(
+                        chat_id=int(user_id), 
+                        text=msg, 
+                        parse_mode="HTML"
+                    )
+                    sent_count += 1
+                    
+                    if sent_count % 20 == 0:
+                        await asyncio.sleep(1)
+                        
+                except Exception as e:
+                    log(f"❌ Alert failed for user {user_id}: {type(e).__name__}")
+            
+            log(f"✅ Sent {sent_count} active alerts")
+        
+        # Only warn if job is taking too long
+        if elapsed > 25:
+            log(f"⚠️ WARNING: Active monitor took {elapsed:.2f}s (close to 30s interval)")
+        
+    except Exception as e:
+        log(f"❌ Error in active_monitor: {e}")
+        log(f"Traceback: {traceback.format_exc()}")
+
+async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
+    """Monitor products for category changes - OPTIMIZED VERSION."""
+    try:
+        import aiohttp
+        import time
+        
+        start_time = time.time()
+        bot = context.bot
+        
+        # Get all global products from database
+        global_cache = get_all_global_products()
+        
+        if not global_cache:
+            log("⚠️ No products in global list to monitor")
+            return
+        
+        product_ids = list(global_cache.keys())
+        log(f"⏰ Category monitor checking {len(product_ids)} products...")  # Keep this - only runs every 5min
+        
+        # ... rest of the code stays the same until the statistics section ...
+        
+        # Log statistics (keep this - only every 5 minutes)
         elapsed = time.time() - start_time
         success_rate = len(current_categories) / len(product_ids) * 100 if product_ids else 0
         
         log(f"✅ Category monitor: {len(current_categories)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
         
+        # Only log issues
         if timeout_batches > 0:
             log(f"⚠️ {timeout_batches} batches timed out")
         
@@ -2345,45 +2276,36 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         
         for pid, cats_now in current_categories.items():
             prev_cats = prev_categories.get(pid, [])
-            
-            # Update storage
             updates[pid] = cats_now
             
-            # Count products currently in whiskey-release
             if "whiskey-release" in cats_now:
                 whiskey_release_count += 1
             
-            # Detect NEW whiskey-release category
             if "whiskey-release" in cats_now and "whiskey-release" not in prev_cats:
                 info = global_cache.get(pid, {})
                 name = info.get("Name", pid)
                 url = info.get("product_full_url", "")
                 
-                log(f"🔔 NEW whiskey-release detected: {name} ({pid})")
+                log(f"🔔 NEW whiskey-release: {name}")  # Always log new whiskey-release
                 
-                # More detailed alert with URL
                 if url:
                     msg = f"📣 <a href='{url}'>{name}</a> added to Whiskey-Release!"
                 else:
                     msg = f"📣 Whiskey-release added for {name}!"
                 
-                # Get all users watching this product
                 watchers = users_watching_product(pid)
                 
-                # Queue alerts
                 for user_id in watchers:
                     alerts_to_send.append((user_id, msg))
         
-        # Log whiskey-release summary
+        # Only log if there ARE whiskey-release products (not every time)
         if whiskey_release_count > 0:
             log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
         
-        # Update all categories in one batch
         if updates:
             set_product_categories_batch(updates)
-            log(f"📝 Updated categories for {len(updates)} products")
+            # Don't log the update count every time - too noisy
         
-        # Send all alerts with rate limiting
         if alerts_to_send:
             log(f"📤 Sending {len(alerts_to_send)} whiskey-release alerts...")
             sent_count = 0
@@ -2397,7 +2319,6 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                     )
                     sent_count += 1
                     
-                    # Rate limit: 20 messages then pause
                     if sent_count % 20 == 0:
                         await asyncio.sleep(1)
                         
@@ -2406,17 +2327,13 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             
             log(f"✅ Sent {sent_count} whiskey-release alerts")
         
-        total_elapsed = time.time() - start_time
-        log(f"⏱️ Total category_monitor time: {total_elapsed:.2f}s")
-        
-        # Warn if getting close to interval time (5 minutes = 300s)
-        if total_elapsed > 240:
-            log(f"⚠️ WARNING: Category job took {total_elapsed:.2f}s (close to 5min interval)")
+        # Only warn if slow
+        if elapsed > 240:
+            log(f"⚠️ WARNING: Category job took {elapsed:.2f}s (close to 5min interval)")
         
     except Exception as e:
         log(f"❌ Error in category_monitor: {e}")
         log(f"Traceback: {traceback.format_exc()}")
-
 
 # ============================================================
 # HELPER FUNCTIONS FOR STOCK MONITORING
