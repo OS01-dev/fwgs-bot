@@ -2287,7 +2287,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                     
                     # Only log batch issues if significant problems
                     if success_count < len(batch) * 0.5:  # Less than 50% success
-                        #log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
+                        log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
                 
                 except asyncio.TimeoutError:
                     log(f"❌ Category batch {batch_num} timed out after {BATCH_TIMEOUT}s")
@@ -2339,10 +2339,6 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 
                 for user_id in watchers:
                     alerts_to_send.append((user_id, msg))
-        
-        # Only log if there ARE whiskey-release products
-        if whiskey_release_count > 0:
-            #log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
         
         if updates:
             set_product_categories_batch(updates)
