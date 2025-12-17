@@ -2308,7 +2308,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                         
                         pid, categories = result
                         if categories is not None:
-                            current_categories[pid] = [str(c).lower() for c in categories]
+                            current_categories[pid] = categories  # Keep as-is, don't lowercase
                             success_count += 1
                         else:
                             failed_fetches.append(pid)
@@ -2341,6 +2341,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         # Check for new whiskey-release categories
         updates = {}
         alerts_to_send = []
+        whiskey_release_count = 0
         
         for pid, cats_now in current_categories.items():
             prev_cats = prev_categories.get(pid, [])
@@ -2348,11 +2349,17 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             # Update storage
             updates[pid] = cats_now
             
-            # Detect new whiskey-release category
+            # Count products currently in whiskey-release
+            if "whiskey-release" in cats_now:
+                whiskey_release_count += 1
+            
+            # Detect NEW whiskey-release category
             if "whiskey-release" in cats_now and "whiskey-release" not in prev_cats:
                 info = global_cache.get(pid, {})
                 name = info.get("Name", pid)
                 url = info.get("product_full_url", "")
+                
+                log(f"🔔 NEW whiskey-release detected: {name} ({pid})")
                 
                 # More detailed alert with URL
                 if url:
@@ -2367,6 +2374,10 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 for user_id in watchers:
                     alerts_to_send.append((user_id, msg))
         
+        # Log whiskey-release summary
+        if whiskey_release_count > 0:
+            log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
+        
         # Update all categories in one batch
         if updates:
             set_product_categories_batch(updates)
@@ -2374,7 +2385,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         
         # Send all alerts with rate limiting
         if alerts_to_send:
-            log(f"📤 Sending {len(alerts_to_send)} category alerts...")
+            log(f"📤 Sending {len(alerts_to_send)} whiskey-release alerts...")
             sent_count = 0
             
             for user_id, msg in alerts_to_send:
@@ -2382,7 +2393,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                     await bot.send_message(
                         chat_id=int(user_id),
                         text=msg,
-                        parse_mode="HTML"  # Enable HTML for links
+                        parse_mode="HTML"
                     )
                     sent_count += 1
                     
@@ -2393,13 +2404,13 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     log(f"❌ Category alert failed for user {user_id}: {type(e).__name__}")
             
-            log(f"✅ Sent {sent_count} category alerts")
+            log(f"✅ Sent {sent_count} whiskey-release alerts")
         
         total_elapsed = time.time() - start_time
         log(f"⏱️ Total category_monitor time: {total_elapsed:.2f}s")
         
         # Warn if getting close to interval time (5 minutes = 300s)
-        if total_elapsed > 240:  # Warn at 4 minutes
+        if total_elapsed > 240:
             log(f"⚠️ WARNING: Category job took {total_elapsed:.2f}s (close to 5min interval)")
         
     except Exception as e:
