@@ -1691,21 +1691,7 @@ async def test_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MONITORING HELPER FUNCTIONS - ACTIVE and CATEGORY
 # ============================================================
 
-Your get_active_only() function looks good! The issue is that you're setting a 5-second timeout per request, but with your current setup, this could still cause problems. Let me show you the math and improvements:
-The Problem:
-With your current settings:
-
-Batch size: 20 products
-Timeout per request: 5 seconds
-Batch delay: 0.5 seconds
-
-If even a few requests timeout (5 seconds each), your batch takes:
-
-20 requests × 5 seconds timeout = up to 100 seconds per batch if all timeout
-This causes the "job missed by X seconds" errors
-
-Improved Version:
-pythonasync def get_active_only(pid, session):
+async def get_active_only(pid, session):
     """
     Lightweight: fetch ONLY the active flag for a product.
     Returns: (pid, True/False) or (pid, None) on error.
