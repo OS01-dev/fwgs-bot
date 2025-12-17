@@ -175,8 +175,19 @@ def init_db():
                 is_admin BOOLEAN DEFAULT FALSE,
                 is_subscribed BOOLEAN DEFAULT FALSE,
                 subscription_expiry TIMESTAMP,
-                joined TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                joined TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                blocked BOOLEAN DEFAULT FALSE
             );
+        """)
+        # Add blocked column if table already exists (migration)
+        cur.execute("""
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT FALSE;
+        """)
+        
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_blocked 
+            ON users(blocked) WHERE blocked = TRUE;
         """)
         
         # WATCHLIST
@@ -715,7 +726,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = get_user_subscription_status(user_id)
     
     welcome_msg = (
-        "🥃 <b>Welcome to the Fine Wine & Good Spirits Bot!</b>\n\n"
+        "🥃 <b>Welcome to the First World Grain n' Spirits Bot!</b>\n\n"
         "📌 This bot tracks product availability and sends real-time alerts.\n\n"
     )
     
@@ -938,9 +949,6 @@ async def show_global_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i in range(0, len(msg_lines), CHUNK_SIZE):
         chunk = msg_lines[i:i+CHUNK_SIZE]
         await update.message.reply_text("🌐 Global products:\n" + "\n".join(chunk))
-
-async def send_global_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Report handler - Coming soon!")
 
 async def addstore_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a store to user's tracked stores - REQUIRES SUBSCRIPTION."""
@@ -1531,19 +1539,18 @@ async def refresh_global_list(app=None, send_report_to_owner=True):
 async def send_today_report_to_all_users(app, filename):
     """Send the daily report to all users who have watchlists."""
     try:
-        log(f"Starting send_today_report_to_all_users with file: {filename}")
-        
         # Verify file exists
         if not os.path.exists(filename):
-            log(f"❌ File does not exist: {filename}")
+            log(f"❌ Report file does not exist: {filename}")
             return
         
+        file_size = os.path.getsize(filename)
+        log(f"📤 Preparing to send report: {os.path.basename(filename)} ({file_size} bytes)")
+        
         bot = app.bot
-        log(f"Bot object: {bot is not None}")
         
         # Get all users
         user_ids = get_all_users()
-        log(f"Found {len(user_ids)} users to send report to: {user_ids}")
         
         if not user_ids:
             log("⚠️ No users to send report to")
@@ -1557,7 +1564,6 @@ async def send_today_report_to_all_users(app, filename):
         
         for user_id in user_ids:
             try:
-                log(f"Attempting to send to user {user_id}...")
                 with open(filename, 'rb') as f:
                     await bot.send_document(
                         chat_id=int(user_id),
@@ -1565,10 +1571,15 @@ async def send_today_report_to_all_users(app, filename):
                         caption="🥃 Your daily FWGS product report! Changes from yesterday are highlighted in yellow.",
                         filename=os.path.basename(filename)
                     )
-                log(f"✅ Sent report to user {user_id}")
                 success_count += 1
+                
+                # Rate limiting - pause every 20 messages
+                if success_count % 20 == 0:
+                    log(f"  ... sent {success_count}/{len(user_ids)} (rate limiting pause)")
+                    await asyncio.sleep(1)
+                    
             except Exception as e:
-                log(f"❌ Failed to send report to user {user_id}: {e}")
+                log(f"❌ Failed to send report to user {user_id}: {type(e).__name__}: {e}")
                 fail_count += 1
         
         log(f"✅ Report distribution complete: {success_count} succeeded, {fail_count} failed")
@@ -1626,8 +1637,9 @@ async def send_global_report(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
     
+    DATA_DIR = "/data"
     today_str = datetime.now().strftime("%Y%m%d")
-    filename = f"{REPORT_PREFIX}{today_str}.xlsx"
+    filename = os.path.join(DATA_DIR, f"{REPORT_PREFIX}{today_str}.xlsx")
     
     if not os.path.exists(filename):
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
@@ -1648,44 +1660,6 @@ async def send_global_report(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         log(f"❌ Error sending report: {e}")
         await update.message.reply_text("⚠️ Error sending report. Please try again later.")
-
-async def test_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test command to manually trigger report generation."""
-    await update.message.reply_text("🔄 Starting report generation test...")
-    
-    try:
-        # Check if pandas and openpyxl are available
-        try:
-            import pandas as pd
-            import openpyxl
-            await update.message.reply_text("✅ pandas and openpyxl are installed")
-        except ImportError as e:
-            await update.message.reply_text(f"❌ Missing library: {e}")
-            return
-        
-        # Check database
-        product_ids = get_all_global_product_ids()
-        await update.message.reply_text(f"✅ Found {len(product_ids)} products in database")
-        
-        if not product_ids:
-            await update.message.reply_text("⚠️ No products in global list. Add some with /add <ProductID>")
-            return
-        
-        # Check users
-        users = get_all_users()
-        await update.message.reply_text(f"✅ Found {len(users)} users with watchlists")
-        
-        # Trigger report generation
-        await update.message.reply_text("🔄 Generating report...")
-        await refresh_global_list(context.application, send_report_to_owner=True)
-        
-        await update.message.reply_text("✅ Report generation completed! Check logs for details.")
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}\n\nCheck logs for full traceback.")
-        log(f"❌ Error in test_report: {e}")
-        log(f"Traceback: {traceback.format_exc()}")
-
 
 # ============================================================
 # MONITORING HELPER FUNCTIONS - ACTIVE and CATEGORY
@@ -2087,7 +2061,7 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
         should_log = (time.time() - active_monitor._last_log_time) > 600  # 10 minutes
         
         if should_log:
-            log(f"⏰ Active monitor checking {len(product_ids)} products...")
+            #log(f"⏰ Active monitor checking {len(product_ids)} products...")
             active_monitor._last_log_time = time.time()
         
         # Get previous states in one batch query
@@ -2252,7 +2226,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        log(f"⏰ Category monitor checking {len(product_ids)} products...")
+        #log(f"⏰ Category monitor checking {len(product_ids)} products...")
         
         # Get previous categories in one batch query
         prev_categories = get_product_categories_batch(product_ids)
@@ -2313,7 +2287,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                     
                     # Only log batch issues if significant problems
                     if success_count < len(batch) * 0.5:  # Less than 50% success
-                        log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
+                        #log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
                 
                 except asyncio.TimeoutError:
                     log(f"❌ Category batch {batch_num} timed out after {BATCH_TIMEOUT}s")
@@ -2328,7 +2302,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         elapsed = time.time() - start_time
         success_rate = len(current_categories) / len(product_ids) * 100 if product_ids else 0
         
-        log(f"✅ Category monitor: {len(current_categories)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
+        #log(f"✅ Category monitor: {len(current_categories)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
         
         # Only log issues
         if timeout_batches > 0:
@@ -2368,7 +2342,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         
         # Only log if there ARE whiskey-release products
         if whiskey_release_count > 0:
-            log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
+            #log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
         
         if updates:
             set_product_categories_batch(updates)
@@ -2854,10 +2828,10 @@ def create_or_update_user(user_id, full_name):
 
 def get_user_subscription_status(user_id):
     """Get user's subscription details.
-    Returns: dict with is_admin, is_subscribed, expiry, trial_active
+    Returns: dict with is_admin, is_subscribed, expiry, trial_active, blocked
     """
     query = """
-        SELECT is_admin, is_subscribed, subscription_expiry 
+        SELECT is_admin, is_subscribed, subscription_expiry, blocked, joined
         FROM users 
         WHERE user_id = %s;
     """
@@ -2872,22 +2846,16 @@ def get_user_subscription_status(user_id):
         if not result:
             return None
         
-        is_admin, is_subscribed, expiry = result
+        is_admin, is_subscribed, expiry, blocked, joined = result
         now = datetime.now()
         
         # Check if subscription is still valid
         is_active = is_subscribed and (expiry is None or expiry > now)
         
         # Check if in trial period (expiry within TRIAL_DAYS of account creation)
-        query_joined = "SELECT joined FROM users WHERE user_id = %s;"
-        cur = conn.cursor()
-        cur.execute(query_joined, (user_id,))
-        joined = cur.fetchone()
-        cur.close()
-        
         trial_active = False
         if joined and expiry:
-            trial_end = joined[0] + timedelta(days=TRIAL_DAYS)
+            trial_end = joined + timedelta(days=TRIAL_DAYS)
             trial_active = now < trial_end and is_active
         
         return {
@@ -2895,7 +2863,8 @@ def get_user_subscription_status(user_id):
             "is_subscribed": is_subscribed,
             "expiry": expiry,
             "is_active": is_active,
-            "trial_active": trial_active
+            "trial_active": trial_active,
+            "blocked": blocked if blocked is not None else False
         }
     except Exception as e:
         log(f"❌ Error getting subscription status: {e}")
@@ -2976,6 +2945,10 @@ def check_access(user_id):
     
     if not status:
         return False, "no_account"
+    
+    # Check if blocked FIRST (even admins can be blocked if needed)
+    if status.get("blocked"):
+        return False, "blocked"
     
     # Admins always have access
     if status["is_admin"]:
