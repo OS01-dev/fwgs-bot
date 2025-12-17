@@ -1737,11 +1737,11 @@ async def get_active_only(pid, session):
 
 async def get_category_only(pid, session):
     """
-    Lightweight: fetch ONLY the categories for a product.
-    Returns: (pid, [categories]) or (pid, None) on error.
+    Lightweight: fetch ONLY the parentCategories for a product.
+    Returns: (pid, [category_ids]) or (pid, None) on error.
     """
     headers = {"User-Agent": "Mozilla/5.0"}
-    url = f"{PRODUCT_BASE_URL}/{pid}?fields=categories"
+    url = f"{PRODUCT_BASE_URL}/{pid}?fields=parentCategories"
     
     try:
         timeout = aiohttp.ClientTimeout(
@@ -1752,21 +1752,29 @@ async def get_category_only(pid, session):
         
         async with session.get(url, headers=headers, timeout=timeout) as resp:
             if resp.status != 200:
-                if resp.status != 404:  # Don't spam logs with 404s
+                if resp.status != 404:
                     log(f"⚠️ Category status {resp.status} for {pid}")
                 return (pid, None)
             
             data = await resp.json()
-            categories = data.get("categories")
             
-            if categories is None:
+            # Extract parentCategories from response
+            parent_categories = data.get("parentCategories")
+            
+            if not parent_categories or not isinstance(parent_categories, list):
                 return (pid, None)
             
-            # Ensure it's a list
-            if not isinstance(categories, list):
-                categories = [categories]
+            # Extract repositoryId from each category object
+            # Response: {"parentCategories": [{"repositoryId": "whiskey-release"}, {"repositoryId": "157"}]}
+            category_ids = []
+            for cat in parent_categories:
+                if isinstance(cat, dict) and "repositoryId" in cat:
+                    category_ids.append(str(cat["repositoryId"]))
             
-            return (pid, categories)
+            if not category_ids:
+                return (pid, None)
+            
+            return (pid, category_ids)
             
     except asyncio.TimeoutError:
         return (pid, None)
