@@ -2058,7 +2058,7 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
         if not hasattr(active_monitor, '_last_log_time'):
             active_monitor._last_log_time = 0
         
-        should_log = (time.time() - active_monitor._last_log_time) > 600  # 10 minutes
+        should_log = (time.time() - active_monitor._last_log_time) > 1200  #20 minutes
         
         if should_log:
             #log(f"⏰ Active monitor checking {len(product_ids)} products...")
@@ -2149,11 +2149,12 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
         for pid, active_now in current_states.items():
             prev_active = prev_states.get(pid)
             
+            # Only update if this is a new product OR status changed
             if prev_active is None:
+                # First time seeing this product
                 changes[pid] = active_now
-                continue
-            
-            if prev_active != active_now:
+            elif prev_active != active_now:
+                # Status changed
                 changes[pid] = active_now
                 
                 info = global_cache.get(pid, {})
@@ -2177,7 +2178,10 @@ async def active_monitor(context: ContextTypes.DEFAULT_TYPE):
         # Update all changed states in one batch
         if changes:
             set_product_active_states_batch(changes)
-            log(f"🔔 Detected {len(changes)} active state changes")
+            # Only log if changes are actual status changes (not first-time additions)
+            actual_changes = sum(1 for pid in changes if prev_states.get(pid) is not None)
+            if actual_changes > 0:
+                log(f"🔔 Detected {actual_changes} active state changes")
         
         # Send all alerts with rate limiting
         if alerts_to_send:
@@ -2226,7 +2230,6 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
             return
         
         product_ids = list(global_cache.keys())
-        #log(f"⏰ Category monitor checking {len(product_ids)} products...")
         
         # Get previous categories in one batch query
         prev_categories = get_product_categories_batch(product_ids)
@@ -2235,7 +2238,7 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         BATCH_SIZE = 15
         BATCH_DELAY = 0.5
         BATCH_TIMEOUT = 10
-        current_categories = {}  # DEFINE THIS HERE
+        current_categories = {}
         failed_fetches = []
         timeout_batches = 0
         
@@ -2280,13 +2283,13 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                         
                         pid, categories = result
                         if categories is not None:
-                            current_categories[pid] = categories  # Keep as-is, don't lowercase
+                            current_categories[pid] = categories
                             success_count += 1
                         else:
                             failed_fetches.append(pid)
                     
                     # Only log batch issues if significant problems
-                    if success_count < len(batch) * 0.5:  # Less than 50% success
+                    if success_count < len(batch) * 0.5:
                         log(f"⚠️ Category batch {batch_num}: Only {success_count}/{len(batch)} succeeded")
                 
                 except asyncio.TimeoutError:
@@ -2302,8 +2305,6 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         elapsed = time.time() - start_time
         success_rate = len(current_categories) / len(product_ids) * 100 if product_ids else 0
         
-        #log(f"✅ Category monitor: {len(current_categories)}/{len(product_ids)} products ({success_rate:.1f}%) in {elapsed:.2f}s")
-        
         # Only log issues
         if timeout_batches > 0:
             log(f"⚠️ {timeout_batches} batches timed out")
@@ -2318,11 +2319,17 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
         
         for pid, cats_now in current_categories.items():
             prev_cats = prev_categories.get(pid, [])
-            updates[pid] = cats_now
             
+            # Count products in whiskey-release
             if "whiskey-release" in cats_now:
                 whiskey_release_count += 1
             
+            # Only update database if categories actually changed
+            if sorted(cats_now) != sorted(prev_cats):
+                updates[pid] = cats_now
+                log(f"🔄 Category change for {pid}: {prev_cats} → {cats_now}")
+            
+            # Detect NEW whiskey-release category
             if "whiskey-release" in cats_now and "whiskey-release" not in prev_cats:
                 info = global_cache.get(pid, {})
                 name = info.get("Name", pid)
@@ -2340,8 +2347,14 @@ async def category_monitor(context: ContextTypes.DEFAULT_TYPE):
                 for user_id in watchers:
                     alerts_to_send.append((user_id, msg))
         
+        # Only log if there ARE whiskey-release products
+        if whiskey_release_count > 0:
+            log(f"📊 Currently {whiskey_release_count} products in whiskey-release")
+        
+        # Only update database if there are actual changes
         if updates:
             set_product_categories_batch(updates)
+            log(f"✅ Updated categories for {len(updates)} products")
         
         if alerts_to_send:
             log(f"📤 Sending {len(alerts_to_send)} whiskey-release alerts...")
