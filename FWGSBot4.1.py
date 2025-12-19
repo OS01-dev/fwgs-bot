@@ -3830,9 +3830,9 @@ async def runner():
     # JobQueue tasks (these use Telegram's built-in job queue)
     app.job_queue.run_repeating(inventory_refresh_job, interval=1800, first=10)
     
-##    import warnings
-##    from telegram.warnings import PTBUserWarning
-##    warnings.filterwarnings("ignore", category=PTBUserWarning)
+    import warnings
+    from telegram.warnings import PTBUserWarning
+    warnings.filterwarnings("ignore", category=PTBUserWarning)
     
     # Daily subscription check (Midnight)
     app.job_queue.run_daily(
